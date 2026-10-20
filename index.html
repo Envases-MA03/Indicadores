@@ -91,6 +91,10 @@ tr.pdone td{color:var(--mu)}
 tr.pdone .pot{text-decoration:line-through}
 td.pob{min-width:180px;white-space:pre-wrap}
 .pcom{margin-top:4px;padding:3px 8px;background:var(--alt);border-radius:6px;font-size:12px}
+.ph{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.ph h3{margin:16px 0 6px}
+#pgauge svg{width:130px;max-height:none}
+.mrow{display:flex;gap:4px;align-items:center}
 .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid currentColor}
 </style>
 </head>
@@ -136,11 +140,11 @@ td.pob{min-width:180px;white-space:pre-wrap}
   <div id="vc"></div>
 
   <div class="pend-sec" id="pendSec">
-    <h3>📌 Pendientes <span class="mu" id="pcnt"></span></h3>
+    <div class="ph"><h3>📌 Pendientes <span class="mu" id="pcnt"></span></h3><div id="pgauge"></div></div>
     <div class="row">
       <label>Área<select id="pfa"><option value="all">Todas</option><option value="a0">Producción</option><option value="a1">Calidad</option><option value="a2">Área química</option><option value="a3">Front end</option><option value="a4">Impresoras</option><option value="a5">Back end</option><option value="a6">Transportes</option></select></label>
       <label>Estado<select id="pfe"><option value="p">Pendientes</option><option value="r">Realizados</option><option value="t">Todos</option></select></label>
-      <div id="pgauge" style="align-self:center"></div>
+      <label>Mes<span class="mrow"><input type="month" id="pfm" title="Vacío = día/mes en curso según la vista"><button type="button" class="btn-sm" id="pfmx" title="Quitar filtro de mes">✕</button></span></label>
     </div>
     <div class="tw" id="pl"></div>
   </div>
@@ -437,8 +441,17 @@ window.commentPend = async (id) => {
   try { await postDoc("pend_" + id, d); } catch(e) {}
 };
 
+const DEL_PASS = "1122";
+function pedirClave() {
+  const p = prompt("Contraseña para eliminar:");
+  if (p === null) return false;
+  if (p.trim() !== DEL_PASS) { alert("Contraseña incorrecta. No se eliminó nada."); return false; }
+  return true;
+}
+
 window.deletePend = async (id) => {
   const d = PEND[id]; if (!d) return;
+  if (!pedirClave()) return;
   if (!confirm(`¿Borrar el pendiente de ${d.area} (${d.resp})?`)) return;
   delete PEND[id]; savePend(); renderPend();
   try { await postDoc("pend_" + id, { tipo:"pendiente", id, fecha:d.fecha, area:d.area, deleted:true }); } catch(e) {}
@@ -446,11 +459,14 @@ window.deletePend = async (id) => {
 
 function renderPend() {
   // Solo los pendientes del día (vista diaria) o del mes (vista mensual) seleccionado
-  const mensual = $("vm").value === "m";
-  const periodo = mensual ? $("vmo").value : $("vd").value;
+  // Si se elige un mes en el selector de Pendientes se muestra ese mes; si está vacío,
+  // se respeta la vista de arriba (día o mes en curso)
+  const pm = $("pfm").value;
+  const mensual = !!pm || $("vm").value === "m";
+  const periodo = pm || (mensual ? $("vmo").value : $("vd").value);
   const list = Object.values(PEND).filter(d => periodo && d.fecha && (mensual ? d.fecha.slice(0, 7) === periodo : d.fecha === periodo));
   const open = list.filter(d => !d.done).length;
-  $("pcnt").textContent = `· ${open} pendiente${open === 1 ? "" : "s"} · ${list.length - open} realizado${list.length - open === 1 ? "" : "s"}`;
+  $("pcnt").textContent = `· ${open} pendiente${open === 1 ? "" : "s"}`;
   const fa = $("pfa").value, fe = $("pfe").value;
 
   // Gauge de avance: realizados / total del periodo (respeta el filtro de área)
@@ -481,7 +497,8 @@ function renderPend() {
     ? `<table><thead><tr><th class="pc">✓</th><th>Área</th><th>Responsable</th><th>Observaciones</th><th>Fecha</th><th>Estado</th><th class="n"></th></tr></thead><tbody>${rows}</tbody></table>`
     : `<p class="mu">No hay pendientes ${mensual ? "en este mes" : "en este día"}.</p>`;
 }
-["pfa","pfe"].forEach(i => $(i).onchange = renderPend);
+["pfa","pfe","pfm"].forEach(i => $(i).onchange = renderPend);
+$("pfmx").onclick = () => { $("pfm").value = ""; renderPend(); };
 
 window.editInd = async (i) => {
   const a = +$("ca").value;
@@ -494,6 +511,7 @@ window.editInd = async (i) => {
 
 window.deleteInd = async (i) => {
   const a = +$("ca").value, n = AREAS[a][1][i];
+  if (!pedirClave()) return;
   if (!confirm(`¿Borrar el indicador "${n}" de ${AREAS[a][0]}? Dejará de mostrarse para todos los usuarios.`)) return;
   try { await areasOp({ op: "deleteInd", areaId: aid(a), indId: iid(a,i) }); renderCap(); render(); $("ms").textContent = "✓ Indicador borrado"; }
   catch(e) { $("ms").textContent = "⚠ " + e.message; }
