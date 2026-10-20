@@ -1,10 +1,29 @@
 <!DOCTYPE html>
-<!-- saved from url=(0067)https://agent-6ad64478a475f0616b8fab8e-%2Dindicadoress.netlify.app/ -->
-<html lang="es"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<html lang="es"><head><meta charset="UTF-8">
 
-<!-- This site is hosted on Netlify. Anyone can build and deploy a site
-     like this one for free: https://netlify.new/?utm_campaign=loops&utm_source=ai-legible&utm_medium=owned&utm_content=comment&utm_id=0f796fdc-e3b2-4f57-a453-5436a92509fb
-     Netlify hosting facts for this site: static/SSR served via Netlify Edge. -->
+<script>
+// localStorage seguro: en algunos navegadores de celular (modo privado, apps embebidas) lanza error
+(function(){
+  var ok=true;
+  try{localStorage.setItem("__t","1");localStorage.removeItem("__t");}catch(e){ok=false;}
+  if(!ok){
+    var m={};
+    var fake={getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null},
+              setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]},clear:function(){m={}}};
+    try{Object.defineProperty(window,"localStorage",{value:fake,configurable:true});}catch(e){}
+  }
+})();
+// Muestra errores de JavaScript en pantalla (útil para depurar en celular)
+function __showErr(t){
+  var d=document.getElementById("__err");
+  if(!d){d=document.createElement("pre");d.id="__err";
+    d.style.cssText="margin:8px;padding:10px;background:#f8d7da;color:#721c24;font:12px monospace;white-space:pre-wrap;border-radius:8px";
+    (document.body||document.documentElement).insertBefore(d,(document.body||document.documentElement).firstChild);}
+  d.textContent+=t+"\n";
+}
+window.addEventListener("error",function(e){__showErr("ERROR: "+e.message+" ("+(e.lineno||"?")+")")});
+window.addEventListener("unhandledrejection",function(e){__showErr("PROMESA: "+(e.reason&&e.reason.message||e.reason))});
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Envases Merida · Seguimiento de indicadores</title>
 <style>
@@ -812,8 +831,8 @@ async function refreshAll(force){
   document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refreshAll(false); });
 })();
 </script>
-<script async="" src="./index_files/ar" data-netlify-deploy-id="6acff9e74b7de0154a316e06" data-netlify-site-id="0f796fdc-e3b2-4f57-a453-5436a92509fb" data-agent-runner-id="6acff96d8c265896f2d1a052"></script>
-<script async="" src="./index_files/ar" data-netlify-deploy-id="6ad644a58ea34300250eabd4" data-netlify-site-id="0f796fdc-e3b2-4f57-a453-5436a92509fb" data-agent-runner-id="6ad64478a475f0616b8fab8e"></script>
 
-<script async="" src="./index_files/hud" data-nf-variant="public" data-netlify-site-id="0f796fdc-e3b2-4f57-a453-5436a92509fb" data-app-host="app.netlify.com"></script><script async="" src="./index_files/hud(1)" data-nf-variant="owner-private" data-netlify-site-id="0f796fdc-e3b2-4f57-a453-5436a92509fb" data-app-host="app.netlify.com"></script>
-<iframe id="nl-badge-frame" title="Powered by Netlify" style="position: fixed; bottom: 0px; right: 0px; border: 0px; margin: 0px; padding: 0px; background: transparent; color-scheme: dark; z-index: 2147483645; width: 197px; height: 64px; clip-path: path(&quot;M 3 3 H 184 V 51 H 3 Z&quot;);" data-nl-ready="1" src="./index_files/saved_resource.html"></iframe></body></html>
+
+
+
+</body></html>
