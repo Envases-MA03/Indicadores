@@ -93,7 +93,14 @@ td.pob{min-width:180px;white-space:pre-wrap}
 .pcom{margin-top:4px;padding:3px 8px;background:var(--alt);border-radius:6px;font-size:12px}
 .ph{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .ph h3{margin:16px 0 6px}
-#pgauge svg{width:130px;max-height:none}
+#pgauge svg{width:110px;max-height:none;display:block}
+.pfrow{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.pfrow .row{flex:1;min-width:0;margin-bottom:0}
+#pgauge{flex:none;margin-left:auto}
+tr.prow{cursor:pointer}
+tr.prow:hover td{background:var(--alt)}
+.pcn{display:inline-block;margin-left:6px;font-size:11px;color:var(--mu)}
+.pcom.empty{color:var(--mu);font-style:italic}
 .mrow{display:flex;gap:4px;align-items:center}
 .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid currentColor}
 </style>
@@ -140,11 +147,14 @@ td.pob{min-width:180px;white-space:pre-wrap}
   <div id="vc"></div>
 
   <div class="pend-sec" id="pendSec">
-    <div class="ph"><h3>📌 Pendientes <span class="mu" id="pcnt"></span></h3><div id="pgauge"></div></div>
+    <div class="ph"><h3>📌 Pendientes <span class="mu" id="pcnt"></span></h3></div>
+    <div class="pfrow">
     <div class="row">
       <label>Área<select id="pfa"><option value="all">Todas</option><option value="a0">Producción</option><option value="a1">Calidad</option><option value="a2">Área química</option><option value="a3">Front end</option><option value="a4">Impresoras</option><option value="a5">Back end</option><option value="a6">Transportes</option></select></label>
       <label>Estado<select id="pfe"><option value="p">Pendientes</option><option value="r">Realizados</option><option value="t">Todos</option></select></label>
       <label>Mes<span class="mrow"><input type="month" id="pfm" title="Vacío = día/mes en curso según la vista"><button type="button" class="btn-sm" id="pfmx" title="Quitar filtro de mes">✕</button></span></label>
+    </div>
+    <div id="pgauge"></div>
     </div>
     <div class="tw" id="pl"></div>
   </div>
@@ -401,6 +411,12 @@ function postDoc(k, data){
 }
 
 // ===== Pendientes =====
+const POPEN = new Set();
+window.togglePCom = (id, ev) => {
+  if (ev && ev.target.closest("button,input,a,textarea,select")) return;
+  POPEN.has(id) ? POPEN.delete(id) : POPEN.add(id);
+  renderPend();
+};
 const savePend = () => localStorage.setItem("pend_v1", JSON.stringify(PEND));
 const newPendId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const pfmt = d => { if(!d) return "—"; const [y,m,dd]=d.split("-").map(Number); return new Date(y,m-1,dd).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"}); };
@@ -437,6 +453,7 @@ window.commentPend = async (id) => {
   if (!t || !t.trim()) return;
   d.coms = Array.isArray(d.coms) ? d.coms : [];
   d.coms.push({ t: t.trim(), f: today() });
+  POPEN.add(id);
   savePend(); renderPend();
   try { await postDoc("pend_" + id, d); } catch(e) {}
 };
@@ -483,16 +500,16 @@ function renderPend() {
 
   const rows = list
     .filter(d => (fa === "all" || d.areaId === fa) && (fe === "t" || (fe === "p" ? !d.done : d.done)))
-    .sort((x, y) => (x.done - y.done) || (x.fecha < y.fecha ? -1 : x.fecha > y.fecha ? 1 : 0))
-    .map(d => `<tr class="${d.done ? "pdone" : ""}">
+    .sort((x, y) => (x.done - y.done) || (x.fecha < y.fecha ? 1 : x.fecha > y.fecha ? -1 : 0))
+    .map(d => { const nc = (d.coms || []).length, op = POPEN.has(d.id); return `<tr class="prow ${d.done ? "pdone" : ""}" onclick="togglePCom('${d.id}', event)" title="Clic para ${op ? "ocultar" : "ver"} comentarios">
       <td class="pc"><input type="checkbox" ${d.done ? "checked" : ""} onchange="togglePend('${d.id}', this.checked)" title="Marcar como realizado"></td>
       <td>${escH(d.area)}</td>
       <td>${escH(d.resp)}</td>
-      <td class="pob"><span class="pot">${escH(d.obs)}</span>${(d.coms || []).map(c => `<div class="pcom">💬 ${escH(c.t)} <span class="mu">· ${pfmt(c.f)}</span></div>`).join("")}</td>
+      <td class="pob"><span class="pot">${escH(d.obs)}</span>${nc ? `<span class="pcn">💬 ${nc} ${op ? "▾" : "▸"}</span>` : ""}${op ? (nc ? d.coms.map(c => `<div class="pcom">💬 ${escH(c.t)} <span class="mu">· ${pfmt(c.f)}</span></div>`).join("") : `<div class="pcom empty">Sin comentarios</div>`) : ""}</td>
       <td>${pfmt(d.fecha)}</td>
       <td>${d.done ? `<span class="badge ok">✓ ${pfmt(d.doneDate)}</span>` : `<span class="badge pend">Pendiente</span>`}</td>
       <td class="n" style="white-space:nowrap"><button class="btn-sm" onclick="commentPend('${d.id}')" title="Agregar comentario">💬</button> <button class="btn-sm" onclick="deletePend('${d.id}')" title="Borrar pendiente">🗑</button></td>
-    </tr>`).join("");
+    </tr>`; }).join("");
   $("pl").innerHTML = rows
     ? `<table><thead><tr><th class="pc">✓</th><th>Área</th><th>Responsable</th><th>Observaciones</th><th>Fecha</th><th>Estado</th><th class="n"></th></tr></thead><tbody>${rows}</tbody></table>`
     : `<p class="mu">No hay pendientes ${mensual ? "en este mes" : "en este día"}.</p>`;
