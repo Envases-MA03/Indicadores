@@ -100,6 +100,8 @@ td.pob{min-width:180px;white-space:pre-wrap}
 tr.prow{cursor:pointer}
 tr.prow:hover td{background:var(--alt)}
 .pcn{display:inline-block;margin-left:6px;font-size:11px;color:var(--mu)}
+.pac{text-align:center!important}
+.badge.lin{font-weight:600}
 .pcom.empty{color:var(--mu);font-style:italic}
 .mrow{display:flex;gap:4px;align-items:center}
 .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid currentColor}
@@ -131,6 +133,7 @@ tr.prow:hover td{background:var(--alt)}
     <div class="row">
       <label>Fecha<input type="date" id="pf"></label>
       <label>Área<select id="pa"><option value="0">Producción</option><option value="1">Calidad</option><option value="2">Área química</option><option value="3">Front end</option><option value="4">Impresoras</option><option value="5">Back end</option><option value="6">Transportes</option></select></label>
+      <label>Línea<select id="pln"><option value="L1">L1</option><option value="L2">L2</option><option value="Ambas" selected>Ambas</option></select></label>
       <label style="flex:1;min-width:180px">Responsable<input type="text" id="pr" maxlength="80" placeholder="Nombre del responsable"></label>
     </div>
     <label>Observaciones<textarea id="po" class="po" rows="3" placeholder="Describe el pendiente..."></textarea></label>
@@ -429,7 +432,7 @@ $("pAdd").onclick = async () => {
   if (!resp) { $("pm").textContent = "⚠ Escribe el responsable"; return; }
   if (!obs) { $("pm").textContent = "⚠ Escribe las observaciones"; return; }
   const id = newPendId();
-  const data = { tipo:"pendiente", id, fecha: pf, areaId: aid(a), area: AREAS[a][0], resp, obs, done:false, doneDate:null };
+  const data = { tipo:"pendiente", id, fecha: pf, areaId: aid(a), area: AREAS[a][0], linea: $("pln").value, resp, obs, done:false, doneDate:null };
   PEND[id] = data; savePend();
   $("pm").textContent = "Guardando...";
   try {
@@ -454,6 +457,25 @@ window.commentPend = async (id) => {
   d.coms = Array.isArray(d.coms) ? d.coms : [];
   d.coms.push({ t: t.trim(), f: today() });
   POPEN.add(id);
+  savePend(); renderPend();
+  try { await postDoc("pend_" + id, d); } catch(e) {}
+};
+
+window.editPend = async (id) => {
+  const d = PEND[id]; if (!d) return;
+  const resp = prompt("Responsable:", d.resp); if (resp === null) return;
+  const obs = prompt("Observaciones:", d.obs); if (obs === null) return;
+  const lin = prompt("Línea (L1, L2 o Ambas):", d.linea || "Ambas"); if (lin === null) return;
+  const linOk = ["L1", "L2", "Ambas"].find(x => x.toLowerCase() === lin.trim().toLowerCase());
+  if (!linOk) { alert("⚠ Línea inválida. Escribe L1, L2 o Ambas."); return; }
+  const [fy, fm, fd] = (d.fecha || "").split("-");
+  const f = prompt("Fecha (DD-MM-AAAA):", d.fecha ? `${fd}-${fm}-${fy}` : ""); if (f === null) return;
+  if (!resp.trim() || !obs.trim()) { alert("⚠ El responsable y las observaciones no pueden quedar vacíos."); return; }
+  const mm = f.trim().match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  const dt = mm ? new Date(+mm[3], +mm[2] - 1, +mm[1]) : null;
+  if (!dt || dt.getFullYear() !== +mm[3] || dt.getMonth() !== +mm[2] - 1 || dt.getDate() !== +mm[1]) { alert("⚠ Fecha inválida. Usa el formato DD-MM-AAAA, ej. 15-03-2025"); return; }
+  const ft = `${mm[3]}-${String(mm[2]).padStart(2, "0")}-${String(mm[1]).padStart(2, "0")}`;
+  d.resp = resp.trim(); d.obs = obs.trim(); d.fecha = ft; d.linea = linOk;
   savePend(); renderPend();
   try { await postDoc("pend_" + id, d); } catch(e) {}
 };
@@ -504,14 +526,15 @@ function renderPend() {
     .map(d => { const nc = (d.coms || []).length, op = POPEN.has(d.id); return `<tr class="prow ${d.done ? "pdone" : ""}" onclick="togglePCom('${d.id}', event)" title="Clic para ${op ? "ocultar" : "ver"} comentarios">
       <td class="pc"><input type="checkbox" ${d.done ? "checked" : ""} onchange="togglePend('${d.id}', this.checked)" title="Marcar como realizado"></td>
       <td>${escH(d.area)}</td>
+      <td>${d.linea ? `<span class="badge lin">${escH(d.linea)}</span>` : `<span class="mu">—</span>`}</td>
       <td>${escH(d.resp)}</td>
       <td class="pob"><span class="pot">${escH(d.obs)}</span>${nc ? `<span class="pcn">💬 ${nc} ${op ? "▾" : "▸"}</span>` : ""}${op ? (nc ? d.coms.map(c => `<div class="pcom">💬 ${escH(c.t)} <span class="mu">· ${pfmt(c.f)}</span></div>`).join("") : `<div class="pcom empty">Sin comentarios</div>`) : ""}</td>
       <td>${pfmt(d.fecha)}</td>
       <td>${d.done ? `<span class="badge ok">✓ ${pfmt(d.doneDate)}</span>` : `<span class="badge pend">Pendiente</span>`}</td>
-      <td class="n" style="white-space:nowrap"><button class="btn-sm" onclick="commentPend('${d.id}')" title="Agregar comentario">💬</button> <button class="btn-sm" onclick="deletePend('${d.id}')" title="Borrar pendiente">🗑</button></td>
+      <td class="pac" style="white-space:nowrap"><button class="btn-sm" onclick="commentPend('${d.id}')" title="Agregar comentario">💬</button> <button class="btn-sm" onclick="editPend('${d.id}')" title="Editar pendiente">✏️</button> <button class="btn-sm" onclick="deletePend('${d.id}')" title="Borrar pendiente">🗑</button></td>
     </tr>`; }).join("");
   $("pl").innerHTML = rows
-    ? `<table><thead><tr><th class="pc">✓</th><th>Área</th><th>Responsable</th><th>Observaciones</th><th>Fecha</th><th>Estado</th><th class="n"></th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th class="pc">✓</th><th>Área</th><th>Línea</th><th>Responsable</th><th>Observaciones</th><th>Fecha</th><th>Estado</th><th class="pac">Acción</th></tr></thead><tbody>${rows}</tbody></table>`
     : `<p class="mu">No hay pendientes ${mensual ? "en este mes" : "en este día"}.</p>`;
 }
 ["pfa","pfe","pfm"].forEach(i => $(i).onchange = renderPend);
