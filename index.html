@@ -101,6 +101,12 @@ tr.prow{cursor:pointer}
 tr.prow:hover td{background:var(--alt)}
 .pcn{display:inline-block;margin-left:6px;font-size:11px;color:var(--mu)}
 .pac{text-align:center!important}
+.lgl{cursor:pointer;border-radius:6px;padding:1px 4px}
+.lgl:hover{background:var(--alt)}
+.lgl.on{outline:2px solid var(--mu)}
+td.clk{cursor:pointer}
+td.clk:hover{text-decoration:underline}
+td.clk.sel{outline:2px solid var(--mu);outline-offset:-2px}
 .badge.lin{font-weight:600}
 .pcom.empty{color:var(--mu);font-style:italic}
 .mrow{display:flex;gap:4px;align-items:center}
@@ -179,7 +185,6 @@ const DEFAULT_AREAS=[
 // Configuración de áreas compartida entre todos los usuarios (se guarda en el servidor).
 // Cada área e indicador tiene un id estable; los datos se guardan con esos ids
 // para que lo que captura una persona nunca aparezca en otra área.
-const AREAS_URL = "/api/areas";
 const seedCfg = () => DEFAULT_AREAS.map(([name, inds], ai) => ({ id: "a" + ai, name, inds: inds.map((n, i) => ({ id: "i" + i, name: n })) }));
 let CFG = seedCfg();
 try { const c = JSON.parse(localStorage.getItem("config_areas_v2")); if (Array.isArray(c) && c.length) CFG = c; } catch(e) {}
@@ -190,7 +195,11 @@ function migrateCfg(c) {
   const n = x => String(x || "").trim().toLowerCase();
   return c.map(a => {
     if (n(a.name) !== "back end" || !Array.isArray(a.inds)) return a;
-    const inds = a.inds.map(i => n(i.name) === "peso de cera" ? { ...i, name: "Merma" } : i);
+    let inds = a.inds.map(i => n(i.name) === "peso de cera" ? { ...i, name: "Merma" } : i);
+    // Los datos guardados en la base usan estos ids para Back end (no cambiarlos, aunque cambie el orden en pantalla)
+    const FIX = { "consumo barniz": "i0", "tiempos muertos necker": "i1", "merma": "i2" };
+    const libres = !inds.some(i => !FIX[n(i.name)] && Object.values(FIX).includes(i.id));
+    if (libres) inds = inds.map(i => FIX[n(i.name)] ? { ...i, id: FIX[n(i.name)] } : i);
     const mi = inds.findIndex(i => n(i.name) === "merma");
     if (mi < 0) return { ...a, inds };
     const [m] = inds.splice(mi, 1);
@@ -210,28 +219,48 @@ setCfg(CFG);
 const aid = ai => CFG[ai] ? CFG[ai].id : "a" + ai;
 const iid = (ai, i) => CFG[ai] && CFG[ai].inds[i] ? CFG[ai].inds[i].id : "i" + i;
 
+// La configuración (áreas e indicadores) se guarda como un registro más en Google Sheets
+// (clave "config_areas") para que todos los usuarios vean los mismos indicadores.
+const genId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+async function saveCfgCloud() {
+  localStorage.setItem("config_pending", "1");   // se quita solo cuando la base confirma el envío
+  await postDoc("config_areas", { tipo: "config", areas: CFG, ts: Date.now() });
+  localStorage.removeItem("config_pending");
+}
 async function areasOp(body) {
-  const res = await fetch(AREAS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !Array.isArray(data)) throw new Error((data && data.error) || "Error al guardar la configuración");
-  setCfg(data);
-  return data;
+  const nm = String(body.name || "").trim();
+  const nrm = x => String(x || "").trim().toLowerCase();
+  const dup = (list, n, skipId) => list.some(x => x.id !== skipId && nrm(x.name) === nrm(n));
+  const c = JSON.parse(JSON.stringify(CFG));
+  if (body.op === "addArea") {
+    if (!nm) throw new Error("Escribe un nombre para el área");
+    if (dup(c, nm)) throw new Error("Ya existe un área con ese nombre");
+    c.push({ id: "a" + genId(), name: nm, inds: [] });
+  } else {
+    const a = c.find(x => x.id === body.areaId);
+    if (!a) throw new Error("No se encontró el área");
+    if (body.op === "addInd") {
+      if (!nm) throw new Error("Escribe un nombre para el indicador");
+      if (dup(a.inds, nm)) throw new Error("Ya existe un indicador con ese nombre en esta área");
+      a.inds.push({ id: "i" + genId(), name: nm });
+    } else if (body.op === "renameInd") {
+      const it = a.inds.find(x => x.id === body.indId);
+      if (!it) throw new Error("No se encontró el indicador");
+      if (!nm) throw new Error("Escribe un nombre para el indicador");
+      if (dup(a.inds, nm, it.id)) throw new Error("Ya existe un indicador con ese nombre en esta área");
+      it.name = nm;
+    } else if (body.op === "deleteInd") {
+      a.inds = a.inds.filter(x => x.id !== body.indId);
+    } else throw new Error("Operación no válida");
+  }
+  setCfg(c);
+  try { await saveCfgCloud(); }
+  catch (e) { const m = $("ms"); if (m) m.textContent = "⚠ Cambio guardado solo en este navegador; se enviará a la base cuando haya conexión"; }
+  return CFG;
 }
 
-async function loadAreas() {
-  try {
-    const res = await fetch(AREAS_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error("config");
-    setCfg(await res.json());
-    // Migra áreas/indicadores que se crearon solo en este navegador con la versión anterior
-    const old = localStorage.getItem("config_areas");
-    if (old) {
-      try { const list = JSON.parse(old); if (Array.isArray(list)) await areasOp({ op: "merge", areas: list }); } catch(e) {}
-      localStorage.removeItem("config_areas");
-    }
-    return true;
-  } catch(e) { return false; }
-}
+// La configuración se recibe junto con los datos (ver loadCloudData)
+async function loadAreas() { return true; }
 
 const LN=["Línea 1","Línea 2","Línea 2.1"],COL=["var(--s1)","var(--s2)","var(--s3)"];
 const $=id=>document.getElementById(id);
@@ -256,9 +285,14 @@ const fmt=v=>{
 };
 
 // Promedios con 2 decimales, excepto "Peso de barniz uv" que conserva todos sus decimales
-const fmtAvg=(v,n)=>{
+// Indicadores en %: % Rechazo necker, % Rechazo orion y Merma de Producción (se muestran con símbolo % y 2 decimales)
+const PCT_NAMES=["% rechazo necker","% rechazo orion"];
+const isPct=(n,ai)=>PCT_NAMES.includes(norm(n))||(ai!=null&&isProdMerma(n,ai));
+const pf=v=>v==null||isNaN(v)?"—":Number(v).toLocaleString("en-US",{minimumFractionDigits:0,maximumFractionDigits:2})+"%";
+const fmtAvg=(v,n,ai)=>{
   if(v==null) return "—";
   if(isTM(n)) return hm(v);
+  if(isPct(n,ai)) return pf(v);
   if(norm(n)==="peso de barniz uv") return fmt(v);
   return Number(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 };
@@ -282,13 +316,15 @@ const parseHM = str => {
 };
 // Merma de Producción: total del día = (Línea 1 + Línea 2) / 2 (solo si hay ambas)
 const isProdMerma = (n, ai) => norm(n) === "merma" && ["producción", "produccion"].includes(norm(AREAS[ai][0]));
+// Merma de Back end: se grafica con la misma lógica que Producción (barras apiladas + acumulado)
+const isMermaBack = (n, ai) => norm(n) === "merma" && norm(AREAS[ai][0]) === "back end";
 const mermaTot = (f, ai, ii) => {
   const a = val(f, ai, ii, 0), b = val(f, ai, ii, 1);
   return a != null && b != null ? (a + b) / 2 : null;
 };
 
 // Valor según el tipo de indicador (tiempos muertos en h:mm)
-const fv = (n, v) => isTM(n) ? hm(v) : fmt(v);
+const fv = (n, v, ai) => isTM(n) ? hm(v) : isPct(n, ai) ? pf(v) : fmt(v);
 
 // Indicadores que solo se capturan en Línea 1 y Línea 2 (sin Línea 2.1)
 const SOLO_L12=["producto detenido","% rechazo necker","movilidad","peso de copa","% rompimientos","consumo aceite","tiempos muertos","consumo barniz","tiempos muertos necker","merma","merma bote caído","producción y merma","produccion y merma","producción","produccion"];
@@ -654,7 +690,7 @@ function daily(){
         if(!lineas(n,ai).includes(l)) return NA;
         const v = val(f,ai,i,l);
         const alertClass = getAlertClass(n, v, ai);
-        return `<td class="n ${alertClass}">${fv(n,v)}</td>`;
+        return `<td class="n ${alertClass}">${fv(n,v,ai)}</td>`;
       }).join("")+`</tr>`;
       const c = com(f,ai,i);
       if (c) rows+=`<tr><td colspan="4" class="mu" style="white-space:pre-wrap;padding-left:20px;border-bottom-style:dashed">💬 ${esc(c)}</td></tr>`;
@@ -686,16 +722,44 @@ function monthTable(){
       rows+=`<tr><td>${n}</td>`+avgs.map((v,l)=>{
         if(!lineas(n,ai).includes(l)) return NA;
         const alertClass = getAlertClass(n, v, ai);
-        return `<td class="n ${alertClass}">${selDay?fv(n,v):fmtAvg(v,n)}</td>`;
+        const on=selLine===l&&$("ci")&&$("ci").value===ai+"."+i;
+        return `<td class="n clk${on?" sel":""} ${alertClass}" onclick="pickLine(${ai},${i},${l})" title="Clic para ver los datos de esta línea en el mes">${selDay?fv(n,v,ai):fmtAvg(v,n,ai)}</td>`;
       }).join("")+`<td class="n mu">${nd}</td></tr>`;
       const c=selDay&&com(selDay,ai,i);
       if(c)rows+=`<tr><td colspan="5" class="mu" style="white-space:pre-wrap;padding-left:20px;border-bottom-style:dashed">💬 ${esc(c)}</td></tr>`})});
   const head=selDay
     ?`<h3>Datos del día ${dfmt(selDay)} <button class="btn-sm" onclick="setSelDay(null)">✕ Ver todo el mes</button></h3>`
-    :`<h3>Promedio mensual general</h3><p class="mu">Da clic en un día de la gráfica para ver solo los datos y comentarios de ese día.</p>`;
+    :`<h3>Promedio mensual general</h3><p class="mu">Da clic en un día de la gráfica para ver solo los datos y comentarios de ese día. Da clic en un valor de la tabla (o en una línea de la leyenda) para ver solo esa línea en el mes.</p>`;
   return `${head}<div class="tw"><table><thead><tr><th>Indicador</th>${LN.map(l=>`<th class="n">${l}</th>`).join("")}<th class="n">Días</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 window.setSelDay=d=>{selDay=d;drawChart();if($("mt"))$("mt").innerHTML=monthTable()};
+// Línea seleccionada (0,1,2 o null = todas): la gráfica muestra solo esa línea y se listan sus datos del mes
+let selLine=null;
+window.setSelLine=l=>{selLine=selLine===l?null:l;drawChart();if($("mt"))$("mt").innerHTML=monthTable()};
+window.onIndChange=()=>{selLine=null;drawChart();if($("mt"))$("mt").innerHTML=monthTable()};
+window.pickLine=(ai,ii,l)=>{
+  const s=$("ci");if(!s)return;
+  const v=ai+"."+ii;
+  if(selLine===l&&s.value===v)selLine=null;else{s.value=v;selLine=l}
+  selDay=null;lastSel=s.value;
+  drawChart();$("mt").innerHTML=monthTable();
+  const ch=$("ch");if(ch&&ch.scrollIntoView)ch.scrollIntoView({behavior:"smooth",block:"center"});
+};
+function renderLineDetail(ai,ii,days){
+  const box=$("lnd");if(!box)return;
+  if(selLine==null){box.innerHTML="";return}
+  const n=AREAS[ai][1][ii];
+  const rows=days.map(d=>[d,val(d,ai,ii,selLine),com(d,ai,ii)]).filter(r=>r[1]!=null);
+  const F=v=>fv(n,v,ai);
+  const acum=ACUM.includes(norm(n))||isMermaBack(n,ai);
+  const hasCom=rows.some(r=>r[2]);
+  let run=0;
+  const body=rows.map(([d,v,c])=>{run+=v;return `<tr><td>${dfmt(d)}</td><td class="n ${getAlertClass(n,v,ai)}">${F(v)}</td>${acum?`<td class="n mu">${F(run)}</td>`:""}${hasCom?`<td class="mu" style="white-space:pre-wrap">${esc(c)}</td>`:""}</tr>`}).join("");
+  const sum=rows.reduce((a,r)=>a+r[1],0);
+  const foot=rows.length?`<tr class="g"><td>Promedio</td><td class="n">${fmtAvg(sum/rows.length,n,ai)}</td>${acum?`<td class="n">${F(sum)}</td>`:""}${hasCom?"<td></td>":""}</tr>`:"";
+  box.innerHTML=`<h3>${esc(n)} · ${LN[selLine]} <span class="mu">(${rows.length} días con captura)</span> <button class="btn-sm" onclick="setSelLine(null)">✕ Ver todas las líneas</button></h3>
+  <div class="tw"><table><thead><tr><th>Día</th><th class="n">Valor</th>${acum?'<th class="n">Acumulado</th>':""}${hasCom?"<th>Comentario</th>":""}</tr></thead><tbody>${body||'<tr><td colspan="4" class="mu">Sin datos de esta línea en el mes.</td></tr>'}${foot}</tbody></table></div>`;
+}
 const dfmt=d=>{const [y,m,dd]=d.split("-").map(Number);return new Date(y,m-1,dd).toLocaleDateString("es-MX",{weekday:"short",day:"numeric",month:"short",year:"numeric"})};
 
 function monthly(){
@@ -705,9 +769,10 @@ function monthly(){
   const sel=$("ci")?$("ci").value:"0.0";
   return `<p class="mu">Días con captura en el mes: ${cap}</p>
   <h3>Tendencia diaria y Promedio</h3>
-  <label style="max-width:300px">Indicador<select id="ci" onchange="drawChart()">${opts}</select></label>
+  <label style="max-width:300px">Indicador<select id="ci" onchange="onIndChange()">${opts}</select></label>
   <div class="leg" id="ch-leg"></div>
   <div id="ch"></div>
+  <div id="lnd"></div>
   <div id="mt">${monthTable()}</div>`;
 }
 
@@ -718,17 +783,21 @@ function drawChart(){
   lastSel=s.value;
   const [ai,ii]=s.value.split(".").map(Number),days=monthDays();
   const W=640,H=240,P=36;
-  const F=isTM(AREAS[ai][1][ii])?hm:fmt;
+  const F=isTM(AREAS[ai][1][ii])?hm:isPct(AREAS[ai][1][ii],ai)?pf:fmt;
   const pm=isProdMerma(AREAS[ai][1][ii],ai);
   const mt=days.map(d=>pm?mermaTot(d,ai,ii):null);
-  const ls=lineas(AREAS[ai][1][ii],ai);
-  const acum=ACUM.includes(norm(AREAS[ai][1][ii]));
-  const stack=STACK.includes(norm(AREAS[ai][1][ii]));
-  const series=[0,1,2].map(l=>ls.includes(l)?days.map(d=>val(d,ai,ii,l)):days.map(()=>null));
+  const ls0=lineas(AREAS[ai][1][ii],ai);
+  if(selLine!=null&&!ls0.includes(selLine))selLine=null;
+  const ls=selLine!=null?[selLine]:ls0;
+  const acum=ACUM.includes(norm(AREAS[ai][1][ii]))||isMermaBack(AREAS[ai][1][ii],ai);
+  const stack=STACK.includes(norm(AREAS[ai][1][ii]))||isMermaBack(AREAS[ai][1][ii],ai);
+  const seriesAll=[0,1,2].map(l=>ls0.includes(l)?days.map(d=>val(d,ai,ii,l)):days.map(()=>null));
+  const series=seriesAll.map((sr,l)=>ls.includes(l)?sr:days.map(()=>null));
   const all=series.flat().filter(x=>x!=null);
   
   if(!all.length){
-    $("ch").innerHTML='<p class="mu">Sin datos para este indicador en el mes.</p>';
+    $("ch").innerHTML='<p class="mu">Sin datos para este indicador'+(selLine!=null?' y línea':'')+' en el mes.'+(selLine!=null?' <button class="btn-sm" onclick="setSelLine(null)">✕ Ver todas las líneas</button>':'')+'</p>';
+    if($("lnd")) $("lnd").innerHTML="";
     if($("ch-leg")) $("ch-leg").innerHTML = "";
     return;
   }
@@ -749,13 +818,14 @@ function drawChart(){
   
   let legHtml = "";
   
-  series.forEach((sr,l)=>{
-    if(!ls.includes(l)) return;
+  seriesAll.forEach((sr,l)=>{
+    if(!ls0.includes(l)) return;
     const valid = sr.filter(x=>x!=null);
     const avg = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : null;
     
-    legHtml += `<span style="margin-right:12px"><i style="background:${COL[l]}"></i>${LN[l]} ${avg!=null ? `<span style="color:${COL[l]}; font-weight:600; margin-left:4px">(${acum?`Acumulado: ${F(valid.reduce((a,b)=>a+b,0))} · `:""}Prom: ${fmtAvg(avg,AREAS[ai][1][ii])})</span>`:''}</span>`;
+    legHtml += `<span class="lgl${selLine===l?" on":""}" onclick="setSelLine(${l})" title="Clic para ver solo esta línea en el mes" style="margin-right:12px"><i style="background:${COL[l]}"></i>${LN[l]} ${avg!=null ? `<span style="color:${COL[l]}; font-weight:600; margin-left:4px">(${acum?`Acumulado: ${F(valid.reduce((a,b)=>a+b,0))} · `:""}Prom: ${fmtAvg(avg,AREAS[ai][1][ii],ai)})</span>`:''}</span>`;
     
+    if(!ls.includes(l)) return;
     if(stack) return;
     if(avg != null) {
       const y = Y(avg);
@@ -779,15 +849,15 @@ function drawChart(){
       });
     });
     const tv=tot.filter(x=>x!=null);
-    if(tv.length) legHtml += `<span style="font-weight:600">Total: <span style="margin-left:4px">${F(tv.reduce((a,b)=>a+b,0))} · Prom: ${fmtAvg(tv.reduce((a,b)=>a+b,0)/tv.length,AREAS[ai][1][ii])}</span></span>`;
+    if(tv.length) legHtml += `<span style="font-weight:600">Total: <span style="margin-left:4px">${F(tv.reduce((a,b)=>a+b,0))} · Prom: ${fmtAvg(tv.reduce((a,b)=>a+b,0)/tv.length,AREAS[ai][1][ii],ai)}</span></span>`;
   }else if(acum&&ls.length>1){
     // Indicadores acumulables sin barras (p. ej. Producto detenido): total de todas las líneas
     const tv=tot.filter(x=>x!=null);
-    if(tv.length) legHtml += `<span style="font-weight:600">Total: <span style="margin-left:4px">${F(tv.reduce((a,b)=>a+b,0))} · Prom: ${fmtAvg(tv.reduce((a,b)=>a+b,0)/tv.length,AREAS[ai][1][ii])}</span></span>`;
+    if(tv.length) legHtml += `<span style="font-weight:600">Total: <span style="margin-left:4px">${F(tv.reduce((a,b)=>a+b,0))} · Prom: ${fmtAvg(tv.reduce((a,b)=>a+b,0)/tv.length,AREAS[ai][1][ii],ai)}</span></span>`;
   }
-  if(pm){
+  if(pm&&selLine==null){
     const mv=mt.filter(x=>x!=null);
-    if(mv.length) legHtml += `<span style="font-weight:600">Total: <span style="margin-left:4px">Prom: ${fmtAvg(mv.reduce((a,b)=>a+b,0)/mv.length,AREAS[ai][1][ii])}</span></span>`;
+    if(mv.length) legHtml += `<span style="font-weight:600">Total: <span style="margin-left:4px">Prom: ${fmtAvg(mv.reduce((a,b)=>a+b,0)/mv.length,AREAS[ai][1][ii],ai)}</span></span>`;
   }
   // Resalta el día seleccionado
   const si=selDay?days.indexOf(selDay):-1;
@@ -824,6 +894,7 @@ function drawChart(){
   svg.addEventListener("pointerleave",hide);
   // Clic en un día: la tabla muestra solo los datos de ese día (clic de nuevo para quitar)
   svg.style.cursor="pointer";
+  renderLineDetail(ai,ii,days);
   svg.addEventListener("click",e=>{const i=idx(e);if(i<0)return;setSelDay(selDay===days[i]?null:days[i])});
 }
 
@@ -835,6 +906,7 @@ function normalizeDocs(raw, pendOut){
   CFG.forEach(a => byName[norm(a.name)] = a.id);
   Object.keys(raw || {}).forEach(k => {
     const d = raw[k];
+    if (d && typeof d === "object" && d.tipo === "config") return;
     if (d && typeof d === "object" && d.tipo === "pendiente") { if (pendOut && !d.deleted && d.id) pendOut[d.id] = d; return; }
     if (!d || typeof d !== "object" || d.deleted) return;
     const f = d.fecha || k.split("_")[0];
@@ -847,13 +919,33 @@ function normalizeDocs(raw, pendOut){
   return out;
 }
 
+// Lectura de la base con límite de tiempo y un reintento: con datos móviles una petición puede quedarse
+// colgada y así no se bloquea la sincronización ni la pantalla.
+const CLOUD_TIMEOUT = 20000;
+async function fetchCloud(){
+  let err;
+  for (let intento = 0; intento < 2; intento++) {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), CLOUD_TIMEOUT);
+    try {
+      const res = await fetch(API_URL, { redirect: "follow", cache: "no-store", signal: ctl.signal });
+      if (!res.ok) throw new Error("Error en la respuesta del servidor");
+      return await res.json();
+    } catch (e) { err = e; if (intento === 0) await new Promise(r => setTimeout(r, 1500)); }
+    finally { clearTimeout(t); }
+  }
+  throw err;
+}
+
 async function loadCloudData(){
   try{
     if(API_URL){
-      const res = await fetch(API_URL, { redirect: "follow", cache: "no-store" });
-      if(!res.ok) throw new Error("Error en la respuesta del servidor");
+      $("warn").innerHTML='<div class="warn">⏳ Conectando a la base de datos…</div>';
+      const raw = await fetchCloud();
+      // Configuración compartida: si este navegador tiene un cambio sin enviar, se envía; si no, se adopta la de la nube
+      if (localStorage.getItem("config_pending") === "1") { try { await saveCfgCloud(); } catch(e) {} }
+      else if (raw && raw.config_areas && Array.isArray(raw.config_areas.areas)) setCfg(raw.config_areas.areas);
       const po = {};
-      docs = normalizeDocs(await res.json(), po);
+      docs = normalizeDocs(raw, po);
       PEND = po; savePend();
       localStorage.setItem("reg_v1", JSON.stringify(docs));
       $("warn").innerHTML='<div class="warn" style="border-color:var(--ok);color:var(--ok)">✓ Conectado a la base de datos en Google Sheets</div>';
