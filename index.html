@@ -338,6 +338,8 @@ const lineas=(n,ai)=>{
   // Si el área es Producción, solo habilita Línea 1 y Línea 2
   if(areaNombre === "producción" || areaNombre === "produccion") return [0,1];
   if(SOLO_L1.includes(n)) return [0];
+  // % Rompimientos (aunque se le cambie un poco el nombre): solo Línea 1 y Línea 2, sin Línea 2.1
+  if(n.includes("rompimientos")) return [0,1];
   // En Impresoras, "Tiempos muertos" sí lleva Línea 2.1
   if(n=="tiempos muertos"&&areaNombre=="impresoras") return [0,1,2];
   return SOLO_L12.includes(n)?[0,1]:[0,1,2];
