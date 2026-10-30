@@ -96,7 +96,25 @@ td.pob{min-width:180px;white-space:pre-wrap}
 #pgauge svg{width:110px;max-height:none;display:block}
 .pfrow{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .pfrow .row{flex:1;min-width:0;margin-bottom:0}
-#pgauge{flex:none;margin-left:auto}
+#pgauge{flex:none;margin-left:auto;display:flex;align-items:center;gap:14px}
+.pfrow{flex-wrap:wrap}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:100}
+.ov[hidden]{display:none}
+.ovb{background:var(--card);color:var(--tx);border:1px solid var(--br);border-radius:12px;padding:18px;max-width:340px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+.ovb h4{margin:0 0 4px;font-size:16px}
+.ovb p{margin:0 0 12px;font-size:13px;color:var(--mu)}
+.ovb input[type=date]{width:100%}
+.ovb .oerr{min-height:16px;margin:6px 0 0;font-size:12px;color:#c0392b}
+.ovb .oact{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.ovb .oact .btn{padding:8px 16px}
+button.badge.ok{background:transparent;color:var(--ok);font-family:inherit;cursor:pointer}
+button.badge.ok:hover{background:var(--alt)}
+.pcom.ptime{background:transparent;border:1px solid var(--ok);color:var(--ok);margin-bottom:4px}
+.pavg{min-width:118px;padding:8px 12px;background:var(--alt);border:1px solid var(--br);border-radius:10px;text-align:center}
+.pavg .pal{font-size:10px;color:var(--mu);text-transform:uppercase;letter-spacing:.4px;line-height:1.2}
+.pavg .pav{font-size:22px;font-weight:700;color:var(--tx);line-height:1.2;margin-top:2px}
+.pavg .pav small{font-size:11px;font-weight:600;color:var(--mu);margin-left:3px}
+.pavg .pas{font-size:10px;color:var(--mu);margin-top:1px}
 tr.prow{cursor:pointer}
 tr.prow:hover td{background:var(--alt)}
 .pcn{display:inline-block;margin-left:6px;font-size:11px;color:var(--mu)}
@@ -169,6 +187,15 @@ td.clk.sel{outline:2px solid var(--mu);outline-offset:-2px}
   </div>
 </section>
 </main>
+<div class="ov" id="cdlg" hidden>
+  <div class="ovb" role="dialog" aria-modal="true" aria-labelledby="cdt">
+    <h4 id="cdt">Fecha de cierre</h4>
+    <p id="cdp"></p>
+    <label>Fecha en que se finalizó<input type="date" id="cdi"></label>
+    <div class="oerr" id="cde"></div>
+    <div class="oact"><button type="button" class="btn-sm" id="cdx">Cancelar</button><button type="button" class="btn" id="cdok">Guardar</button></div>
+  </div>
+</div>
 <script>
 // URL de tu Google Apps Script
 const API_URL = "https://script.google.com/macros/s/AKfycbzyP-NVxTcMoPP2PiSRa1ekfoZ7Pg6DsDSRG0ghJ8I4QhfEHbQ2fBjUTLdPGaZjcbdV/exec";
@@ -460,6 +487,7 @@ window.togglePCom = (id, ev) => {
 };
 const savePend = () => localStorage.setItem("pend_v1", JSON.stringify(PEND));
 const newPendId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const diasEntre = (a, b) => { const [y1,m1,d1] = a.split("-").map(Number), [y2,m2,d2] = b.split("-").map(Number); return Math.max(0, Math.round((Date.UTC(y2,m2-1,d2) - Date.UTC(y1,m1-1,d1)) / 864e5)); };
 const pfmt = d => { if(!d) return "—"; const [y,m,dd]=d.split("-").map(Number); return new Date(y,m-1,dd).toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"}); };
 
 $("pAdd").onclick = async () => {
@@ -481,9 +509,47 @@ $("pAdd").onclick = async () => {
   } catch(e) { $("pm").textContent = "⚠ Error al guardar el pendiente"; }
 };
 
+// Diálogo para elegir la fecha real de cierre (devuelve "AAAA-MM-DD" o null si se cancela)
+function askDoneDate(d, initial) {
+  return new Promise(resolve => {
+    const ov = $("cdlg"), inp = $("cdi"), err = $("cde");
+    const max = today(), min = (d.fecha && d.fecha <= max) ? d.fecha : "";
+    $("cdp").textContent = `${d.area} · ${d.resp} — capturado el ${pfmt(d.fecha)}`;
+    inp.min = min; inp.max = max; inp.value = initial || max; err.textContent = "";
+    ov.hidden = false; inp.focus();
+    const close = v => { ov.hidden = true; $("cdok").onclick = $("cdx").onclick = ov.onclick = inp.onkeydown = null; resolve(v); };
+    const ok = () => {
+      const v = inp.value;
+      if (!v) { err.textContent = "⚠ Elige una fecha"; return; }
+      if (min && v < min) { err.textContent = "⚠ No puede ser anterior a la fecha de captura (" + pfmt(min) + ")"; return; }
+      if (v > max) { err.textContent = "⚠ No puede ser una fecha futura"; return; }
+      close(v);
+    };
+    $("cdok").onclick = ok;
+    $("cdx").onclick = () => close(null);
+    ov.onclick = e => { if (e.target === ov) close(null); };
+    inp.onkeydown = e => { if (e.key === "Enter") ok(); else if (e.key === "Escape") close(null); };
+  });
+}
+
 window.togglePend = async (id, chk) => {
   const d = PEND[id]; if (!d) return;
-  d.done = !!chk; d.doneDate = d.done ? today() : null;
+  if (chk) {
+    const f = await askDoneDate(d, today());
+    if (!f) { renderPend(); return; }   // cancelado: el check vuelve a quedar sin marcar
+    d.done = true; d.doneDate = f;
+  } else {
+    d.done = false; d.doneDate = null;
+  }
+  savePend(); renderPend();
+  try { await postDoc("pend_" + id, d); } catch(e) {}
+};
+
+window.editDoneDate = async (id) => {
+  const d = PEND[id]; if (!d || !d.done) return;
+  const f = await askDoneDate(d, d.doneDate);
+  if (!f || f === d.doneDate) return;
+  d.doneDate = f;
   savePend(); renderPend();
   try { await postDoc("pend_" + id, d); } catch(e) {}
 };
@@ -551,24 +617,36 @@ function renderPend() {
   const gt = gl.length, gd = gl.filter(d => d.done).length;
   const pct = gt ? Math.round(gd / gt * 100) : 0;
   const gc = !gt ? "var(--br)" : pct >= 80 ? "var(--ok)" : pct >= 40 ? "var(--pend)" : "#c0392b";
+  // Tiempo promedio de solución: días entre la fecha de captura y la de finalización (solo realizados)
+  const tiempos = gl.filter(d => d.done && d.fecha && d.doneDate).map(d => diasEntre(d.fecha, d.doneDate));
+  const avg = tiempos.length ? tiempos.reduce((a, b) => a + b, 0) / tiempos.length : null;
+  const avgTxt = avg === null ? "—" : avg.toLocaleString("es-MX", { maximumFractionDigits: 1 });
+  const avgCard = `<div class="pavg" title="Promedio de días desde que se captura el pendiente hasta que se finaliza">
+    <div class="pal">Tiempo promedio de solución</div>
+    <div class="pav">${avgTxt}${avg === null ? "" : `<small>${avg === 1 ? "día" : "días"}</small>`}</div>
+    <div class="pas">${avg === null ? "Sin realizados" : `${tiempos.length} realizado${tiempos.length === 1 ? "" : "s"}`}</div>
+  </div>`;
   $("pgauge").innerHTML = `<svg viewBox="0 0 140 84" width="150" role="img" aria-label="Avance de pendientes ${pct}%">
     <path d="M14 70 A56 56 0 0 1 126 70" fill="none" stroke="var(--br)" stroke-width="12" pathLength="100"/>
     ${gt && pct ? `<path d="M14 70 A56 56 0 0 1 126 70" fill="none" stroke="${gc}" stroke-width="12" pathLength="100" stroke-dasharray="${pct} 100"/>` : ""}
     <text x="70" y="58" text-anchor="middle" font-size="22" font-weight="700" fill="var(--tx)">${gt ? pct + "%" : "—"}</text>
     <text x="70" y="78" text-anchor="middle" font-size="10" fill="var(--mu)">${gt ? `${gd} de ${gt} realizados` : "Sin pendientes"}</text>
-  </svg>`;
+  </svg>${avgCard}`;
 
   const rows = list
     .filter(d => (fa === "all" || d.areaId === fa) && (fe === "t" || (fe === "p" ? !d.done : d.done)))
     .sort((x, y) => (x.done - y.done) || (x.fecha < y.fecha ? 1 : x.fecha > y.fecha ? -1 : 0))
-    .map(d => { const nc = (d.coms || []).length, op = POPEN.has(d.id); return `<tr class="prow ${d.done ? "pdone" : ""}" onclick="togglePCom('${d.id}', event)" title="Clic para ${op ? "ocultar" : "ver"} comentarios">
+    .map(d => { const nc = (d.coms || []).length, op = POPEN.has(d.id);
+      const ts = (d.done && d.fecha && d.doneDate) ? diasEntre(d.fecha, d.doneDate) : null;
+      const tsH = (op && ts !== null) ? `<div class="pcom ptime">⏱ <b>Tiempo de solución: ${ts === 0 ? "el mismo día" : ts + (ts === 1 ? " día" : " días")}</b> <span class="mu">· ${pfmt(d.fecha)} → ${pfmt(d.doneDate)}</span></div>` : "";
+      return `<tr class="prow ${d.done ? "pdone" : ""}" onclick="togglePCom('${d.id}', event)" title="Clic para ${op ? "ocultar" : "ver"} ${d.done ? "detalle y comentarios" : "comentarios"}">
       <td class="pc"><input type="checkbox" ${d.done ? "checked" : ""} onchange="togglePend('${d.id}', this.checked)" title="Marcar como realizado"></td>
       <td>${escH(d.area)}</td>
       <td>${d.linea ? `<span class="badge lin">${escH(d.linea)}</span>` : `<span class="mu">—</span>`}</td>
       <td>${escH(d.resp)}</td>
-      <td class="pob"><span class="pot">${escH(d.obs)}</span>${nc ? `<span class="pcn">💬 ${nc} ${op ? "▾" : "▸"}</span>` : ""}${op ? (nc ? d.coms.map(c => `<div class="pcom">💬 ${escH(c.t)} <span class="mu">· ${pfmt(c.f)}</span></div>`).join("") : `<div class="pcom empty">Sin comentarios</div>`) : ""}</td>
+      <td class="pob"><span class="pot">${escH(d.obs)}</span>${nc ? `<span class="pcn">💬 ${nc} ${op ? "▾" : "▸"}</span>` : ""}${tsH}${op ? (nc ? d.coms.map(c => `<div class="pcom">💬 ${escH(c.t)} <span class="mu">· ${pfmt(c.f)}</span></div>`).join("") : `<div class="pcom empty">Sin comentarios</div>`) : ""}</td>
       <td>${pfmt(d.fecha)}</td>
-      <td>${d.done ? `<span class="badge ok">✓ ${pfmt(d.doneDate)}</span>` : `<span class="badge pend">Pendiente</span>`}</td>
+      <td>${d.done ? `<button type="button" class="badge ok" onclick="editDoneDate('${d.id}')" title="Cambiar fecha de cierre">✓ ${pfmt(d.doneDate)}</button>` : `<span class="badge pend">Pendiente</span>`}</td>
       <td class="pac" style="white-space:nowrap"><button class="btn-sm" onclick="commentPend('${d.id}')" title="Agregar comentario">💬</button> <button class="btn-sm" onclick="editPend('${d.id}')" title="Editar pendiente">✏️</button> <button class="btn-sm" onclick="deletePend('${d.id}')" title="Borrar pendiente">🗑</button></td>
     </tr>`; }).join("");
   $("pl").innerHTML = rows
