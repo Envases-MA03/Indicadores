@@ -638,7 +638,7 @@ function renderPend() {
     .sort((x, y) => (x.done - y.done) || (x.fecha < y.fecha ? 1 : x.fecha > y.fecha ? -1 : 0))
     .map(d => { const nc = (d.coms || []).length, op = POPEN.has(d.id);
       const ts = (d.done && d.fecha && d.doneDate) ? diasEntre(d.fecha, d.doneDate) : null;
-      const tsH = (op && ts !== null) ? `<div class="pcom ptime">⏱ <b>Tiempo de solución: ${ts === 0 ? "el mismo día" : ts + (ts === 1 ? " día" : " días")}</b> <span class="mu">· ${pfmt(d.fecha)} → ${pfmt(d.doneDate)}</span></div>` : "";
+      const tsH = (op && ts !== null) ? `<div class="pcom ptime">⏱ <b>Tiempo de solución: ${ts === 0 ? "el mismo día" : ts + (ts === 1 ? " día" : " días")}</b></div>` : "";
       return `<tr class="prow ${d.done ? "pdone" : ""}" onclick="togglePCom('${d.id}', event)" title="Clic para ${op ? "ocultar" : "ver"} ${d.done ? "detalle y comentarios" : "comentarios"}">
       <td class="pc"><input type="checkbox" ${d.done ? "checked" : ""} onchange="togglePend('${d.id}', this.checked)" title="Marcar como realizado"></td>
       <td>${escH(d.area)}</td>
